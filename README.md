@@ -5,7 +5,7 @@ A FastAPI-based microservice for managing student records with MongoDB as the da
 ## Links
 
 - **GitHub Repository:** https://github.com/m1991k/student-service.git
-- **Docker Hub Image:** m1991karm/student-service
+- **Docker Hub Image:** m1991karm/student-service:v1
 - **OpenAPI Documentation:** http://127.0.0.1:8000/docs
 
 ## Features
@@ -28,23 +28,27 @@ A FastAPI-based microservice for managing student records with MongoDB as the da
 ### Local Development
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/m1991k/student-service.git
    cd student-service
    ```
 
 2. **Create a virtual environment:**
+
    ```bash
    python -m venv mkvenv
    source mkvenv/bin/activate  # On Windows: mkvenv\Scripts\activate
    ```
 
 3. **Install dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Configure environment variables:**
+
    ```bash
    cp .env.example .env
    # Edit .env with your MongoDB credentials
@@ -60,6 +64,7 @@ The API will be available at `http://127.0.0.1:8000`
 ## Docker Deployment
 
 ### Prerequisites
+
 - Ensure MongoDB is running:
   ```bash
   docker run -d --name mongodb -p 27017:27017 \
@@ -79,6 +84,7 @@ docker build -t student-service:latest .
 ### Run the Container
 
 **PowerShell:**
+
 ```powershell
 docker run -d `
   --name student-app `
@@ -90,6 +96,7 @@ docker run -d `
 ```
 
 **Command Prompt (cmd):**
+
 ```cmd
 docker run -d ^
   --name student-app ^
@@ -132,11 +139,13 @@ docker logs student-app
 ### Example Requests
 
 **Get all students:**
+
 ```bash
 curl http://127.0.0.1:8000/api/v1/students/
 ```
 
 **Create a student:**
+
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/students/ \
   -H "Content-Type: application/json" \
@@ -150,6 +159,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/students/ \
 ## API Documentation
 
 Interactive API documentation is available at:
+
 - **Swagger UI:** http://127.0.0.1:8000/docs
 - **ReDoc:** http://127.0.0.1:8000/redoc
 
@@ -212,6 +222,7 @@ The application includes comprehensive logging for debugging:
 - MongoDB connection logging
 
 View logs:
+
 ```bash
 # Local development
 docker logs student-app
