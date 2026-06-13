@@ -3,6 +3,7 @@ venv/
 mkvenv/
 env/
 ENV/
+local_resources/
 
 # Environment variables
 .env
