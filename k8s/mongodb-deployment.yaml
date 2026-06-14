@@ -53,11 +53,8 @@ spec:
               memory: "512Mi"
               cpu: "500m"
           livenessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - mongosh --eval "db.adminCommand('ping')"
+            tcpSocket:
+              port: 27017
             initialDelaySeconds: 30
             periodSeconds: 10
       volumes:
@@ -84,5 +81,5 @@ metadata:
   name: mongodb-secret
   namespace: student-app
 type: Opaque
-stringData:
-  password: "Admin@123"
+data:
+  password: QWRtaW5AMTIz

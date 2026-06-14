@@ -10,3 +10,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.APP_NAME)
 logger.info(f"Starting {settings.APP_NAME}")
 app.include_router(router, prefix="/api/v1/students", tags=["Students"])
+
+@app.get("/info", tags=["App Info"])
+async def get_app_info():
+    """Get application information including version and name"""
+    logger.info("Fetching app info")
+    return {
+        "appName": settings.APP_NAME,
+        "version": 'V1'
+    }

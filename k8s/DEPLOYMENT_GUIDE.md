@@ -4,7 +4,7 @@ This guide demonstrates how to deploy the Student Service API and MongoDB to Kub
 
 - **Rolling updates** for seamless deployments
 - **Self-healing** with liveness and readiness probes
-- **External accessibility** via LoadBalancer service
+- **External accessibility** via Ingress
 - **Horizontal Pod Autoscaler (HPA)** for dynamic scaling
 - **MongoDB cluster-internal access** only
 - **Automatic recovery** from pod failures
@@ -24,12 +24,12 @@ This guide demonstrates how to deploy the Student Service API and MongoDB to Kub
 │                                                           │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │       Service API Tier (Externally Exposed)      │  │
-│  │   Type: LoadBalancer (External IP/Port 80)       │  │
+│  │   Type:  Ingress                                 │  │
 │  └──────────────────────────────────────────────────┘  │
 │           ↓                                              │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  Deployment: student-app                         │  │
-│  │  - Replicas: 4 pods                              │  │
+│  │  - Replicas: 4 pods (configurable via HPA)       │  │
 │  │  - Strategy: Rolling Updates                     │  │
 │  │  - Resource Limits: 256Mi mem, 500m cpu          │  │
 │  └──────────────────────────────────────────────────┘  │
@@ -38,43 +38,80 @@ This guide demonstrates how to deploy the Student Service API and MongoDB to Kub
 │  │  HPA: student-app-hpa                            │  │
 │  │  - Min: 2 replicas | Max: 10 replicas            │  │
 │  │  - CPU: 70% threshold                            │  │
-│  │  - Memory: 80% threshold                         │  │
+│  │  - Memory: 80% utilization                       │  │
+│  └──────────────────────────────────────────────────┘  │
+│           ↓                                              │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  Namespace: student-app                          │  │
+│  │  └─ Isolates all resources in this namespace     │  │
 │  └──────────────────────────────────────────────────┘  │
 │           ↓                                              │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │   Database Tier (Cluster-Internal Only)          │  │
-│  │   Type: ClusterIP (No External Access)           │  │
+│  │   Type: ClusterIP Service (Headless)             │  │
 │  └──────────────────────────────────────────────────┘  │
 │           ↓                                              │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  StatefulSet: mongodb                            │  │
-│  │  - Replicas: 1 pod (currently)                   │  │
-│  │  - Persistent Storage: PVC (5Gi)                 │  │
-│  │  - Automatic recovery on pod deletion            │  │
+│  │  - Replicas: 1 pod                               │  │
+│  │  - Storage: PVC (5Gi) ↔ PV (5Gi)                 │  │
+│  │  - Persistent data at /data/db                   │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                           │
 └─────────────────────────────────────────────────────────┘
 ```
+
+## YAML Files Summary
+
+| File                          | Purpose                                                                | Type                                             | Namespace     |
+| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------ | ------------- |
+| `student-app-namespace.yaml`  | Creates namespace and labels                                           | Namespace                                        | N/A           |
+| `persistent-volume.yaml`      | Defines PV for MongoDB storage                                         | PersistentVolume                                 | cluster-wide  |
+| `mongodb-deployment.yaml`     | MongoDB StatefulSet + PVC + Secret + Service                           | StatefulSet, PVC, Secret, Service                | `student-app` |
+| `student-app-deployment.yaml` | App Deployment + ConfigMap + Secret + LoadBalancer Service + HPA + PDB | Deployment, ConfigMap, Secret, Service, HPA, PDB | `student-app` |
+| `ingress.yaml`                | NGINX IngressClass + Ingress + ClusterIP Service                       | IngressClass, Ingress, Service                   | `student-app` |
 
 ## Deployment Steps
 
 ### 1. Create the Namespace
 
 ```bash
-kubectl apply -f k8s/student-app-deployment.yaml
+kubectl apply -f k8s/student-app-namespace.yaml
 ```
 
 This creates:
 
-- `student-app` namespace
-- ConfigMap with application configuration
-- Secret with MongoDB URI and credentials
-- Deployment with 4 replicas, rolling update strategy, and probes
-- LoadBalancer Service for external access
-- HPA for automatic scaling
-- PodDisruptionBudget for high availability
+- `student-app` namespace with appropriate labels
 
-### 2. Deploy MongoDB
+**Verify namespace creation:**
+
+```bash
+kubectl get namespace student-app
+```
+
+### 2. Create Persistent Volume (Optional - For Local Development)
+
+```bash
+kubectl apply -f k8s/persistent-volume.yaml
+```
+
+This creates:
+
+- `mongodb-pv` PersistentVolume with 5Gi capacity
+- Storage class: `standard`
+- Reclaim policy: `Retain` (data persists after PVC deletion)
+- hostPath backend (for local clusters like minikube/docker-desktop)
+
+**For Production:** Replace hostPath with cloud storage (AWS EBS, GCP PD, Azure Disk, etc.)
+
+**Verify PV creation:**
+
+```bash
+kubectl get pv
+kubectl describe pv mongodb-pv
+```
+
+### 3. Deploy MongoDB
 
 ```bash
 kubectl apply -f k8s/mongodb-deployment.yaml
@@ -82,14 +119,45 @@ kubectl apply -f k8s/mongodb-deployment.yaml
 
 This creates:
 
-- PersistentVolumeClaim for data persistence
+- PersistentVolumeClaim (5Gi) that binds to the PersistentVolume
 - StatefulSet for MongoDB with 1 replica
-- Secret for MongoDB password
+- Secret with MongoDB root password
 - ClusterIP Service (headless) for cluster-internal access only
 
-### 3. Setup NGINX Ingress Controller (Optional - For Ingress Exposure)
+**Verify MongoDB deployment:**
 
-If you want to expose the service via Ingress instead of LoadBalancer:
+```bash
+kubectl get pods -n student-app -l app=mongodb
+kubectl get pvc -n student-app
+kubectl get statefulset -n student-app
+```
+
+### 4. Deploy Student Application
+
+```bash
+kubectl apply -f k8s/student-app-deployment.yaml
+```
+
+This creates:
+
+- ConfigMap with application configuration
+- Secret with MongoDB URI and credentials
+- Deployment with 4 replicas, rolling update strategy, and probes
+- ClusterIP Service to expose API using ingress
+- HPA (Horizontal Pod Autoscaler) for automatic scaling
+- PodDisruptionBudget for high availability
+
+**Verify application deployment:**
+
+```bash
+kubectl get deployment student-app -n student-app
+kubectl get pods -n student-app -l app=student-app
+kubectl get svc -n student-app
+```
+
+### 5. Setup NGINX Ingress Controller (Optional - For Ingress-Based Exposure)
+
+If you want to expose the service via Ingress instead of LoadBalancer (recommended for production):
 
 ```bash
 # Add NGINX Helm repository
@@ -103,7 +171,14 @@ helm install nginx-ingress ingress-nginx/ingress-nginx \
   --set controller.service.type=LoadBalancer
 ```
 
-### 4. Deploy Ingress Resource
+**Verify NGINX Ingress Controller installation:**
+
+```bash
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+```
+
+### 6. Deploy Ingress Resource
 
 ```bash
 kubectl apply -f k8s/ingress.yaml
@@ -111,9 +186,18 @@ kubectl apply -f k8s/ingress.yaml
 
 This creates:
 
-- IngressClass for NGINX
-- Ingress resource that routes traffic to student-app service
-- Updates the Service to use ClusterIP (not LoadBalancer)
+- IngressClass for NGINX controller configuration
+- Ingress resource that routes traffic from `student-api.example.com` to student-app service
+- Single entry point for all API requests
+- Annotations for SSL redirect, rate limiting, and rewrite rules
+- ClusterIP Service (updated from LoadBalancer)
+
+**Verify Ingress deployment:**
+
+```bash
+kubectl get ingress -n student-app
+kubectl describe ingress student-app-ingress -n student-app
+```
 
 **Configure DNS:**
 Edit `/etc/hosts` (Linux/Mac) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
@@ -126,26 +210,23 @@ Get the Ingress IP:
 
 ```bash
 kubectl get ingress student-app-ingress -n student-app
+# Look for external IP or hostname in the INGRESS column
 ```
 
-### 5. Verify Deployment
+### 7. Verify Full Deployment
 
 ```bash
-# Check if resources are created
+# Check all resources in the namespace
 kubectl get all -n student-app
 
-# Check pod status
-kubectl get pods -n student-app
-kubectl get pods -n student-app -w  # Watch for changes
+# Check persistent volumes and claims
+kubectl get pv,pvc -n student-app
 
-# Check services
-kubectl get svc -n student-app
-
-# Check Ingress
+# Check ingress
 kubectl get ingress -n student-app
 
-# Check HPA status
-kubectl get hpa -n student-app
+# Watch pod status
+kubectl get pods -n student-app -w
 ```
 
 ## Features Demonstrated
@@ -221,23 +302,30 @@ kubectl get pods -n student-app -w
 
 ### 3. External Accessibility
 
-The Service is exposed via LoadBalancer:
+The application can be exposed via:
+
+**Option A: LoadBalancer Service** (configured in `student-app-deployment.yaml`)
 
 ```yaml
-apiVersion: v1
-kind: Service
 type: LoadBalancer
 ports:
   - port: 80
     targetPort: 8000
 ```
 
-**Get external IP:**
+Get external IP:
 
 ```bash
 kubectl get svc student-app-service -n student-app
 # For local cluster (minikube/docker-desktop):
-# kubectl port-forward svc/student-app-service 8000:8000 -n student-app
+kubectl port-forward svc/student-app-service 8000:8000 -n student-app
+```
+
+**Option B: Ingress with NGINX** (configured in `ingress.yaml` - recommended for production)
+
+```bash
+kubectl get ingress student-app-ingress -n student-app
+# Access via: http://student-api.example.com (after DNS setup)
 ```
 
 **Access the API:**
@@ -285,36 +373,61 @@ kubectl get pods -n student-app -w
 kubectl get hpa student-app-hpa -n student-app --watch
 ```
 
-### 5. Ingress-Based External Access
+### 5. Ingress-Based External Access (Production Recommended)
 
-Alternative to LoadBalancer, expose the API via NGINX Ingress Controller:
+Alternative to LoadBalancer, expose the API via NGINX Ingress Controller for better resource utilization and advanced routing:
 
-**Install NGINX Ingress Controller (if not already installed):**
+**Benefits of Ingress over LoadBalancer:**
+
+- Single entry point for multiple services
+- Path-based and host-based routing
+- Built-in rate limiting and SSL/TLS support
+- Better for multi-service architectures
+- Reduced cloud infrastructure costs
+
+**Complete Ingress Setup (All Steps):**
 
 ```bash
+# 1. Create namespace first
+kubectl apply -f k8s/student-app-namespace.yaml
+
+# 2. Create persistent volume
+kubectl apply -f k8s/persistent-volume.yaml
+
+# 3. Deploy MongoDB
+kubectl apply -f k8s/mongodb-deployment.yaml
+
+# 4. Deploy Student App (with LoadBalancer)
+kubectl apply -f k8s/student-app-deployment.yaml
+
+# 5. Install NGINX Ingress Controller via Helm
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 helm install nginx-ingress ingress-nginx/ingress-nginx \
   --namespace ingress-nginx \
   --create-namespace \
   --set controller.service.type=LoadBalancer
-```
 
-**Deploy Ingress resource:**
-
-```bash
+# 6. Deploy Ingress resource (routes to student-app service)
 kubectl apply -f k8s/ingress.yaml
 ```
 
-**Check Ingress status:**
+**Verify Ingress setup:**
 
 ```bash
+# Check Ingress Controller
+kubectl get pods -n ingress-nginx
+
+# Check Ingress resource
 kubectl get ingress -n student-app
 kubectl describe ingress student-app-ingress -n student-app
+
+# Get Ingress IP/Hostname
+kubectl get ingress student-app-ingress -n student-app -o jsonpath='{.status.loadBalancer.ingress[0]}'
 ```
 
 **Configure DNS (for production):**
-Edit `/etc/hosts` or your DNS provider:
+Edit `/etc/hosts` (Linux/Mac) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
 
 ```
 <INGRESS-IP> student-api.example.com
@@ -330,15 +443,17 @@ INGRESS_IP=$(kubectl get ingress student-app-ingress -n student-app \
 # Access the API
 curl http://$INGRESS_IP/api/v1/students/
 curl http://$INGRESS_IP/docs
+
+# Or via hostname (after DNS setup)
+curl http://student-api.example.com/api/v1/students/
 ```
 
-**Benefits of Ingress over LoadBalancer:**
+**Ingress Features (from `ingress.yaml`):**
 
-- Single entry point for multiple services
-- Path-based routing (`/api/*`, `/docs/*`, etc.)
-- Optional TLS/HTTPS support
-- Better resource utilization
-- Built-in rate limiting and authentication options
+- **SSL Redirect**: Forces HTTPS connections
+- **Rate Limiting**: 100 requests per second
+- **Cert Manager Integration**: Automatic HTTPS with Let's Encrypt
+- **Rewrite Target**: Normalizes request paths
 
 ### 6. MongoDB Cluster-Internal Access
 
@@ -392,6 +507,57 @@ kubectl get pvc -n student-app
 # Check if data directory is recreated
 kubectl exec -it mongodb-0 -n student-app -- \
   ls -la /data/db/
+```
+
+### 8. Persistent Volume and Storage Management
+
+**Monitor storage usage:**
+
+```bash
+# Check PersistentVolume status
+kubectl get pv
+kubectl describe pv mongodb-pv
+
+# Check PersistentVolumeClaim binding
+kubectl get pvc -n student-app
+kubectl describe pvc mongodb-pvc -n student-app
+```
+
+**Resize PersistentVolume (for production scenarios):**
+
+```bash
+# Edit the PVC to request more storage
+kubectl edit pvc mongodb-pvc -n student-app
+# Update: spec.resources.requests.storage to desired size
+```
+
+**Storage Backends:**
+
+- **Local Development**: `hostPath` (current implementation in `persistent-volume.yaml`)
+- **Production Recommendations**:
+  - AWS: EBS volumes
+  - GCP: Persistent Disks
+  - Azure: Azure Disks
+  - On-premises: NFS or block storage
+
+**Switch to different storage class:**
+
+```bash
+# Check available storage classes
+kubectl get storageclass
+
+# Update mongodb-deployment.yaml to use different storageClassName
+```
+
+**Backup MongoDB data:**
+
+```bash
+# Create backup
+kubectl exec -it mongodb-0 -n student-app -- \
+  mongodump --uri="mongodb://admin:Admin@123@localhost:27017" --out=/tmp/backup
+
+# Extract from pod
+kubectl cp student-app/mongodb-0:/tmp/backup ./backup-local
 ```
 
 ## Configuration Management
@@ -458,28 +624,93 @@ kubectl describe pod <pod-name> -n student-app
 
 ## Cleanup
 
+**Complete Cleanup (remove everything):**
+
 ```bash
-# Delete everything in the namespace
+# 1. Remove Ingress and Helm release
+kubectl delete ingress student-app-ingress -n student-app
+helm uninstall nginx-ingress -n ingress-nginx
+
+# 2. Delete the entire student-app namespace (removes all resources within)
 kubectl delete namespace student-app
 
-# Or delete individual resources
+# 3. Delete Persistent Volume (if using local storage)
+kubectl delete pv mongodb-pv
+
+# 4. Remove ingress-nginx namespace (if no longer needed)
+kubectl delete namespace ingress-nginx
+```
+
+**Selective Cleanup (remove specific resources):**
+
+```bash
+# Delete only the application deployment
 kubectl delete deployment student-app -n student-app
+
+# Delete only MongoDB
 kubectl delete statefulset mongodb -n student-app
+
+# Delete PersistentVolumeClaim (WARNING: data will be lost!)
 kubectl delete pvc mongodb-pvc -n student-app
+
+# Delete Ingress only
+kubectl delete ingress student-app-ingress -n student-app
+
+# Delete the namespace
+kubectl delete namespace student-app
+```
+
+**Warning:** Deleting a PersistentVolumeClaim with `Retain` policy will preserve the data, but will need manual cleanup of the PersistentVolume:
+
+```bash
+kubectl delete pv mongodb-pv
+# If using hostPath, manually remove: /mnt/data/mongodb
 ```
 
 ## Production Considerations
 
-1. **Use persistent storage backend** (AWS EBS, GCP PD, etc.)
-2. **Enable RBAC** for security
-3. **Use Network Policies** to restrict traffic
-4. **Implement resource quotas** at namespace level
-5. **Use private container registries** instead of Docker Hub
-6. **Enable audit logging** for compliance
-7. **Configure pod security policies** for security
-8. **Use sealed secrets** for sensitive data
-9. **Implement backup strategies** for MongoDB data
-10. **Monitor with Prometheus/Grafana** for observability
+1. **Persistent Storage Backend**
+   - Replace `hostPath` with cloud storage (AWS EBS, GCP PD, Azure Disk)
+   - Configure appropriate `storageClassName` in `persistent-volume.yaml`
+   - Set `persistentVolumeReclaimPolicy` to `Delete` for automatic cleanup
+
+2. **Namespace Isolation**
+   - Use the `student-app` namespace from `student-app-namespace.yaml`
+   - Apply resource quotas at namespace level
+   - Use Network Policies to restrict traffic
+
+3. **Ingress Setup**
+   - Deploy via `ingress.yaml` with NGINX Ingress Controller
+   - Configure SSL/TLS certificates (Let's Encrypt integration included)
+   - Enable rate limiting (100 req/sec configured)
+
+4. **Data Persistence & Backup**
+   - Regularly backup MongoDB data
+   - Test backup restoration procedures
+   - Monitor PVC usage and resize as needed
+   - Implement automated backup solutions
+
+5. **Security**
+   - Use RBAC for access control
+   - Store secrets in secure vaults (not in YAML)
+   - Use sealed-secrets or external secret management
+   - Enable pod security policies
+
+6. **Monitoring**
+   - Install Prometheus and Grafana for metrics
+   - Setup AlertManager for critical alerts
+   - Enable audit logging for compliance
+   - Monitor PV/PVC usage and performance
+
+7. **High Availability**
+   - Scale MongoDB to 3+ replicas for production
+   - Update HPA limits based on expected load
+   - Configure PodDisruptionBudgets (included)
+
+8. **Resource Management**
+   - Set CPU and memory requests/limits (configured in YAML files)
+   - Implement resource quotas at namespace level
+   - Monitor and optimize resource consumption
 
 ## Troubleshooting Common Issues
 
