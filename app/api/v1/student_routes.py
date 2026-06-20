@@ -5,9 +5,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+studentRouter = APIRouter()
 
-@router.post("/")
+@studentRouter.post("")
 async def create_student(student: Student):
     logger.info(f"Creating student: {student}")
     try:
@@ -18,7 +18,7 @@ async def create_student(student: Student):
         logger.error(f"Error creating student: {e}", exc_info=True)
         raise HTTPException(500, f"Error creating student: {str(e)}")
 
-@router.get("/")
+@studentRouter.get("")
 async def get_students():
     logger.info("Fetching all students")
     try:
@@ -29,7 +29,7 @@ async def get_students():
         logger.error(f"Error fetching students: {e}", exc_info=True)
         raise HTTPException(500, f"Error fetching students: {str(e)}")
 
-@router.get("/{student_id}")
+@studentRouter.get("/{student_id}")
 async def get_student(student_id: str):
     logger.info(f"Fetching student with ID: {student_id}")
     try:
@@ -44,7 +44,7 @@ async def get_student(student_id: str):
         logger.error(f"Error fetching student {student_id}: {e}", exc_info=True)
         raise HTTPException(500, f"Error fetching student: {str(e)}")
 
-@router.put("/{student_id}")
+@studentRouter.put("/{student_id}")
 async def update_student(student_id: str, student: Student):
     logger.info(f"Updating student with ID: {student_id}")
     try:
@@ -55,7 +55,7 @@ async def update_student(student_id: str, student: Student):
         logger.error(f"Error updating student {student_id}: {e}", exc_info=True)
         raise HTTPException(500, f"Error updating student: {str(e)}")
 
-@router.delete("/{student_id}")
+@studentRouter.delete("/{student_id}")
 async def delete_student(student_id: str):
     logger.info(f"Deleting student with ID: {student_id}")
     try:

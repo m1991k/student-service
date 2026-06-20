@@ -4,7 +4,7 @@ metadata:
   name: student-app-ingress
   namespace: student-app
 spec:
-  ingressClassName: gce
+  ingressClassName: nginx
   defaultBackend:
     service:
       name: student-app-service

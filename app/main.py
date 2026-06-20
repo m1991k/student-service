@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from app.api.v1.student_routes import router
+from app.api.v1.student_routes import studentRouter
+from app.api.v1.health_routes import healthRouter
 from app.core.config import settings
 import logging
 
@@ -9,13 +10,5 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.APP_NAME)
 logger.info(f"Starting {settings.APP_NAME}")
-app.include_router(router, prefix="/api/v1/students", tags=["Students"])
-
-@app.get("/info", tags=["App Info"])
-async def get_app_info():
-    """Get application information including version and name"""
-    logger.info("Fetching app info")
-    return {
-        "appName": settings.APP_NAME,
-        "version": 'V1'
-    }
+app.include_router(studentRouter, prefix="/api/v1/students", tags=["Students"])
+app.include_router(healthRouter, prefix="/api/v1/health", tags=["Health"])
